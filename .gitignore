@@ -1,0 +1,19 @@
+# Generated reports
+iom_report_*.md
+
+# State files contain client IDs in filename — exclude all
+iom_state_*.json
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Environment / secrets
+.env
+*.env
+
+# macOS
+.DS_Store
+
+# Video files
+*.mp4

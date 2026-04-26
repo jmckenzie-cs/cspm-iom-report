@@ -93,32 +93,36 @@ def _is_active(entity: dict) -> bool:
 def _fetch_all_entities(
     base_url: str, token: str, filter_cloud: str | None = None
 ) -> list[dict]:
-    """Page all non-compliant IOM IDs (offset-based) and fetch entity details.
+    """Page all non-compliant IOM IDs via cursor pagination and fetch entity details.
 
-    Uses offset pagination which reliably stops — cursor pagination on this
-    endpoint returns a next token even on the last page.
+    Uses next_token cursor pagination (not offset) because the API rejects offsets
+    beyond 10,000. The API always returns a next_token even on the last page, so
+    the stop condition is len(ids) >= total rather than absence of a next_token.
     """
     headers = {"Authorization": f"Bearer {token}"}
     cloud_part = f"+cloud_provider:'{filter_cloud}'" if filter_cloud else ""
     fql = f"status:'non-compliant'{cloud_part}"
 
-    # Collect all IDs via offset pagination
+    # Collect all IDs via cursor pagination
     all_ids: list[str] = []
-    offset = 0
+    next_token: str | None = None
     while True:
+        params: dict = {"filter": fql, "limit": 500}
+        if next_token:
+            params["next_token"] = next_token
         resp = requests.get(
             f"{base_url}{QUERY_EP}",
             headers=headers,
-            params={"filter": fql, "limit": 500, "offset": offset},
+            params=params,
             timeout=60,
         )
         resp.raise_for_status()
         body = resp.json()
         page = body.get("resources", [])
         total = body.get("meta", {}).get("pagination", {}).get("total", 0)
+        next_token = body.get("meta", {}).get("next")
         all_ids.extend(page)
-        offset += len(page)
-        if not page or offset >= total:
+        if not page or len(all_ids) >= total:
             break
         time.sleep(0.2)
 

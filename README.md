@@ -195,22 +195,27 @@ regardless of scan cycle.
 
 ---
 
-### 2. Infinite pagination loop
+### 2. Infinite pagination loop / offset limit
 
 The `cloud-security-evaluations` query endpoint **always returns a `next` cursor token**, even
 on the final page. The original cursor-based pagination used `if not next_token` as the stop
 condition, which caused an infinite loop returning the same first page of results indefinitely.
 
+Additionally, offset-based pagination fails with a 400 error for tenants with more than 10,000
+non-compliant findings — the API rejects `offset=10000` and above.
+
 The script appeared to hang with no output (compounded by Python's output buffering in background
 processes).
 
-**Fix:** Switched to **offset-based pagination** with an explicit stop condition:
+**Fix:** Cursor (`next_token`) pagination with a count-based stop condition:
 
 ```python
-offset += len(page)
-if not page or offset >= total:
+if not page or len(all_ids) >= total:
     break
 ```
+
+This handles both the infinite loop (stops when collected IDs reach the reported total) and
+the offset limit (never uses offset, so no 10,000 cap applies).
 
 ---
 

@@ -33,6 +33,7 @@ import time
 import argparse
 import textwrap
 from datetime import datetime, timezone
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 try:
     import requests
@@ -98,6 +99,8 @@ def _fetch_all_entities(
     Uses next_token cursor pagination (not offset) because the API rejects offsets
     beyond 10,000. The API always returns a next_token even on the last page, so
     the stop condition is len(ids) >= total rather than absence of a next_token.
+
+    Entity detail batches are fetched in parallel (10 workers) for speed.
     """
     headers = {"Authorization": f"Bearer {token}"}
     cloud_part = f"+cloud_provider:'{filter_cloud}'" if filter_cloud else ""
@@ -124,17 +127,17 @@ def _fetch_all_entities(
         all_ids.extend(page)
         if not page or len(all_ids) >= total:
             break
-        time.sleep(0.2)
+        time.sleep(0.1)
 
     if not all_ids:
         return []
 
     print(f"    Fetching details for {len(all_ids)} non-compliant evaluation(s) ...")
 
-    # Fetch entity details in batches of 100
-    entities: list[dict] = []
-    for i in range(0, len(all_ids), 100):
-        batch = all_ids[i: i + 100]
+    # Split into batches of 100 and fetch in parallel
+    batches = [all_ids[i: i + 100] for i in range(0, len(all_ids), 100)]
+
+    def _fetch_batch(batch: list[str]) -> list[dict]:
         resp = requests.get(
             f"{base_url}{ENTITY_EP}",
             headers=headers,
@@ -142,8 +145,13 @@ def _fetch_all_entities(
             timeout=60,
         )
         resp.raise_for_status()
-        entities.extend(resp.json().get("resources", []))
-        time.sleep(0.1)
+        return resp.json().get("resources", [])
+
+    entities: list[dict] = []
+    with ThreadPoolExecutor(max_workers=10) as pool:
+        futures = {pool.submit(_fetch_batch, b): b for b in batches}
+        for future in as_completed(futures):
+            entities.extend(future.result())
 
     return entities
 
